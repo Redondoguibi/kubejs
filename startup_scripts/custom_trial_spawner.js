@@ -57,7 +57,8 @@ StartupEvents.registry('block', event => {
 
     event.create('stone_trial_spawner')
         .displayName('Stone Trial Spawner')
-        .texture('kubejs:block/stone_spawner')
+        .parentModel('kubejs:block/stone_spawner_model')
+        .defaultCutout()
         .stoneSoundType()
         .unbreakable()
         .blockEntity(info => {
