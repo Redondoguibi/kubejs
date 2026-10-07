@@ -23,7 +23,7 @@
 //
 // RUNTIME FIELDS are managed by this script and normally should not be edited.
 
-const CUSTOM_TRIAL_SPAWNER = 'kubejs:custom_trial_spawner'
+const CUSTOM_TRIAL_SPAWNER = 'kubejs:stone_trial_spawner'
 
 const $CompoundTag = Java.loadClass('net.minecraft.nbt.CompoundTag')
 const $SpawnEggItem = Java.loadClass('net.minecraft.world.item.SpawnEggItem')
