@@ -5,7 +5,7 @@
 // not upgrade or otherwise affect it.
 //
 // Texture:
-//   assets/kubejs/textures/block/custom_trial_spawner.png
+//   assets/kubejs/textures/block/stone_spawner.png
 
 const $CompoundTag = Java.loadClass('net.minecraft.nbt.CompoundTag')
 
@@ -18,7 +18,7 @@ StartupEvents.registry('block', event => {
 
     event.create('custom_trial_spawner')
         .displayName('Custom Trial Spawner')
-        .textureAll('kubejs:block/custom_trial_spawner')
+        .textureAll('kubejs:block/stone_spawner')
         .stoneSoundType()
         .hardness(5.0)
         .resistance(1200.0)
