@@ -124,6 +124,7 @@
 
     BlockEvents.rightClicked(event => {
         const stack = event.item
+<<<<<<< HEAD
 
         if (stack == null) {
             return
@@ -137,6 +138,14 @@
             return
         }
 
+=======
+        if (stack == null || stack.isEmpty() || stack.id !== MASTER_EGG) return
+
+        // The Stone Trial Spawner has its own Master Egg handler. Do not spawn
+        // the copied mob next to it when the player is trying to configure it.
+        if (event.block.id === 'kubejs:stone_trial_spawner') return
+    
+>>>>>>> d643c16d23db5877aabaa680f1da5fe5c381ca9b
         const level = event.level
 
         if (level.isClientSide()) {
