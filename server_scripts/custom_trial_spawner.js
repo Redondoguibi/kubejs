@@ -24,6 +24,7 @@
 // RUNTIME FIELDS are managed by this script and normally should not be edited.
 
 const CUSTOM_TRIAL_SPAWNER = 'kubejs:stone_trial_spawner'
+const MASTER_EGG = 'kubejs:master_egg'
 
 const $CompoundTag = Java.loadClass('net.minecraft.nbt.CompoundTag')
 const $SpawnEggItem = Java.loadClass('net.minecraft.world.item.SpawnEggItem')
@@ -133,7 +134,7 @@ function resetRuntimeForConfiguration(runtime) {
     runtime.putLong('cooldown_until', 0)
 }
 
-// Configure the spawner by right-clicking it with any SpawnEggItem.
+// Configure the spawner with either a normal Spawn Egg or a filled Master Egg.
 BlockEvents.rightClicked(CUSTOM_TRIAL_SPAWNER, event => {
     const level = event.block.level
     if (level.isClientSide()) return
@@ -142,7 +143,10 @@ BlockEvents.rightClicked(CUSTOM_TRIAL_SPAWNER, event => {
     if (stack == null || stack.isEmpty()) return
 
     const item = stack.item
-    if (!(item instanceof $SpawnEggItem)) return
+    const isNormalSpawnEgg = item instanceof $SpawnEggItem
+    const isMasterEgg = stack.id === MASTER_EGG
+
+    if (!isNormalSpawnEgg && !isMasterEgg) return
 
     const blockEntity = event.block.entity
     if (blockEntity == null) return
@@ -152,22 +156,61 @@ BlockEvents.rightClicked(CUSTOM_TRIAL_SPAWNER, event => {
     const runtime = parts.runtime
 
     if (config.getBoolean('lock_spawn_egg')) {
-        event.player.tell('Este Custom Trial Spawner está bloqueado para ovos de spawn.')
+        event.player.tell('Este Stone Trial Spawner está bloqueado para configuração por ovos.')
         event.cancel()
         return
     }
 
     if (runtime.getBoolean('active')) {
-        event.player.tell('Derrote os mobs atuais antes de trocar o ovo deste spawner.')
+        event.player.tell('Derrote os mobs atuais antes de trocar o mob deste spawner.')
         event.cancel()
         return
     }
 
+    // Master Egg: copy both entity type and the captured entity NBT.
+    if (isMasterEgg) {
+        const masterData = stack.getCustomData()
+
+        if (!masterData.contains('captured_type') || !masterData.contains('captured_nbt')) {
+            event.player.tell('Este Master Egg está vazio.')
+            event.cancel()
+            return
+        }
+
+        const capturedType = masterData.getString('captured_type')
+        if (capturedType.length === 0) {
+            event.player.tell('Este Master Egg está vazio.')
+            event.cancel()
+            return
+        }
+
+        config.putString('mob_id', capturedType)
+        config.put('mob_nbt', masterData.getCompound('captured_nbt').copy())
+
+        resetRuntimeForConfiguration(runtime)
+        blockEntity.sync()
+
+        const capturedName = masterData.contains('captured_name')
+            ? masterData.getString('captured_name')
+            : capturedType
+
+        event.player.tell('Stone Trial Spawner configurado para: ' + capturedName)
+        event.cancel()
+        return
+    }
+
+    // Normal spawn egg: only change the entity type.
     const entityType = item.getType(stack)
     const entityId = $BuiltInRegistries.ENTITY_TYPE.getKey(entityType)
     if (entityId == null) return
 
     config.putString('mob_id', entityId.toString())
+
+    // A normal spawn egg represents the default version of the entity, so reset
+    // mob_nbt to the standard placeholder instead of keeping NBT from a prior
+    // Master Egg configuration.
+    config.put('mob_nbt', createDefaultMobNbt())
+
     resetRuntimeForConfiguration(runtime)
     blockEntity.sync()
 
@@ -175,7 +218,7 @@ BlockEvents.rightClicked(CUSTOM_TRIAL_SPAWNER, event => {
         stack.shrink(1)
     }
 
-    event.player.tell('Custom Trial Spawner configurado para: ' + entityId)
+    event.player.tell('Stone Trial Spawner configurado para: ' + entityId)
     event.cancel()
 })
 
