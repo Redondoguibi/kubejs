@@ -55,15 +55,11 @@ StartupEvents.registry('block', event => {
     defaults.put('config', config)
     defaults.put('runtime', runtime)
 
-    event.create('custom_trial_spawner')
-        .displayName('Custom Trial Spawner')
+    event.create('stone_trial_spawner')
+        .displayName('Stone Trial Spawner')
         .textureAll('kubejs:block/stone_spawner')
         .stoneSoundType()
-        .hardness(5.0)
-        .resistance(1200.0)
-        .requiresTool()
-        .tagBlock('minecraft:mineable/pickaxe')
-        .tagBlock('minecraft:needs_iron_tool')
+        .unbreakable()
         .blockEntity(info => {
             info.initialData(defaults)
             info.serverTicking()
