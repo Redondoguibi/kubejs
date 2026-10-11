@@ -124,28 +124,12 @@
 
     BlockEvents.rightClicked(event => {
         const stack = event.item
-<<<<<<< HEAD
-
-        if (stack == null) {
-            return
-        }
-
-        if (stack.isEmpty()) {
-            return
-        }
-
-        if (stack.id !== MASTER_EGG) {
-            return
-        }
-
-=======
         if (stack == null || stack.isEmpty() || stack.id !== MASTER_EGG) return
 
         // The Stone Trial Spawner has its own Master Egg handler. Do not spawn
         // the copied mob next to it when the player is trying to configure it.
         if (event.block.id === 'kubejs:stone_trial_spawner') return
-    
->>>>>>> d643c16d23db5877aabaa680f1da5fe5c381ca9b
+
         const level = event.level
 
         if (level.isClientSide()) {
@@ -168,15 +152,21 @@
             return
         }
 
+        // ENTITY_TYPE.get() never returns null (unknown ids fall back to
+        // minecraft:pig), so validate the id explicitly.
         const resourceLocation =
-            $ResourceLocation.parse(typeId)
+            $ResourceLocation.tryParse(typeId)
+
+        if (
+            resourceLocation == null ||
+            !$BuiltInRegistries.ENTITY_TYPE.containsKey(resourceLocation)
+        ) {
+            event.player.tell('Master Egg: mob desconhecido (' + typeId + ').')
+            return
+        }
 
         const entityType =
             $BuiltInRegistries.ENTITY_TYPE.get(resourceLocation)
-
-        if (entityType == null) {
-            return
-        }
 
 
         // Spawn in the block adjacent to the clicked face.
