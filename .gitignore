@@ -1,0 +1,2 @@
+# KubeJS web server config contains an auth token - never commit it
+config/web_server.json
