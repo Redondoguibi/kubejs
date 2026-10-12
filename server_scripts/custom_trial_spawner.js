@@ -12,7 +12,12 @@
 // detection_radius          Player activation radius in blocks.
 // spawn_count               Total mobs spawned per encounter.
 // max_alive                 Maximum simultaneous spawned mobs.
-// spawn_delay_ticks         Delay between individual spawns.
+// spawn_delay_ticks         Delay between individual spawns. Values below 10 are
+//                           honoured by spawning several mobs in one check.
+// abandon_ticks             If no player is nearby for this long during an
+//                           encounter, the encounter is aborted and rearmed
+//                           (recovers from mobs removed without dying).
+//                           0 disables this.
 // cooldown_ticks            Delay after the encounter before rearming.
 // require_players_to_leave  If true, players must leave before another cycle.
 // one_time                  If true, the spawner permanently stops after 1 win.
@@ -95,6 +100,7 @@ function ensureSpawnerData(data) {
     putDefaultInt(config, 'max_alive', 1)
     putDefaultInt(config, 'spawn_delay_ticks', 20)
     putDefaultInt(config, 'cooldown_ticks', 100)
+    putDefaultInt(config, 'abandon_ticks', 1200)
     putDefaultBoolean(config, 'require_players_to_leave', true)
     putDefaultBoolean(config, 'one_time', false)
     putDefaultBoolean(config, 'consume_spawn_egg', true)
@@ -115,6 +121,7 @@ function ensureSpawnerData(data) {
     putDefaultInt(runtime, 'cycle_id', 0)
     putDefaultLong(runtime, 'next_spawn_time', 0)
     putDefaultLong(runtime, 'cooldown_until', 0)
+    putDefaultLong(runtime, 'abandon_since', 0)
 
     data.remove('mob_id')
     data.remove('active')
@@ -132,6 +139,53 @@ function resetRuntimeForConfiguration(runtime) {
     runtime.putInt('alive_count', 0)
     runtime.putLong('next_spawn_time', 0)
     runtime.putLong('cooldown_until', 0)
+    runtime.putLong('abandon_since', 0)
+}
+
+// Spawns one mob. Returns true if it was added to the world.
+function spawnOne(level, block, blockEntity, config, runtime, mobId, gameTime) {
+    // ENTITY_TYPE.get() falls back to minecraft:pig for unknown ids, so check
+    // the id explicitly (tryParse also avoids exceptions on malformed ids).
+    const mobRl = $ResourceLocation.tryParse(mobId)
+    if (mobRl == null || !$BuiltInRegistries.ENTITY_TYPE.containsKey(mobRl)) return false
+    const entityType = $BuiltInRegistries.ENTITY_TYPE.get(mobRl)
+
+    const mob = block.createEntity(entityType)
+    if (mob == null) return false
+
+    mob.setPositionAndRotation(
+        block.x + config.getDouble('spawn_offset_x'),
+        block.y + config.getDouble('spawn_offset_y'),
+        block.z + config.getDouble('spawn_offset_z'),
+        level.random.nextFloat() * 360.0,
+        0.0
+    )
+
+    const customMobNbt = config.getCompound('mob_nbt')
+    if (!customMobNbt.isEmpty()) {
+        mob.mergeNbt(customMobNbt)
+    }
+
+    if (mob instanceof $Mob) {
+        mob.setPersistenceRequired()
+    }
+
+    const mobData = mob.persistentData
+    mobData.putBoolean('custom_trial_spawner_mob', true)
+    mobData.putInt('spawner_x', block.x)
+    mobData.putInt('spawner_y', block.y)
+    mobData.putInt('spawner_z', block.z)
+    mobData.putString('spawner_dimension', block.dimension.toString())
+    mobData.putInt('cycle_id', runtime.getInt('cycle_id'))
+
+    if (!level.addFreshEntity(mob)) {
+        runtime.putLong('next_spawn_time', gameTime + 20)
+        return false
+    }
+
+    runtime.putInt('spawned_count', runtime.getInt('spawned_count') + 1)
+    runtime.putInt('alive_count', runtime.getInt('alive_count') + 1)
+    return true
 }
 
 // Configure the spawner with either a normal Spawn Egg or a filled Master Egg.
@@ -246,9 +300,28 @@ BlockEvents.blockEntityTick(CUSTOM_TRIAL_SPAWNER, event => {
     const spawnCount = Math.max(1, config.getInt('spawn_count'))
     const maxAlive = Math.max(1, config.getInt('max_alive'))
     const spawnDelay = Math.max(0, config.getInt('spawn_delay_ticks'))
-    const cooldown = Math.max(0, config.getInt('cooldown_ticks'))
     const gameTime = level.getGameTime()
     const nearbyPlayers = block.getPlayersInRadius(detectionRadius)
+
+    // Abort stuck encounters: if mobs vanish without dying (discard, mob
+    // conversion, ...) alive_count would never reach 0. Bumping cycle_id makes
+    // any leftover mob from the aborted encounter be ignored on death.
+    if (runtime.getBoolean('active')) {
+        const abandonTicks = Math.max(0, config.getInt('abandon_ticks'))
+
+        if (nearbyPlayers.isEmpty()) {
+            if (runtime.getLong('abandon_since') === 0) {
+                runtime.putLong('abandon_since', gameTime)
+            } else if (abandonTicks > 0 && gameTime - runtime.getLong('abandon_since') >= abandonTicks) {
+                resetRuntimeForConfiguration(runtime)
+                runtime.putInt('cycle_id', runtime.getInt('cycle_id') + 1)
+                blockEntity.sync()
+                return
+            }
+        } else if (runtime.getLong('abandon_since') !== 0) {
+            runtime.putLong('abandon_since', 0)
+        }
+    }
 
     if (runtime.getBoolean('waiting_reset')) {
         if (gameTime < runtime.getLong('cooldown_until')) return
@@ -278,56 +351,24 @@ BlockEvents.blockEntityTick(CUSTOM_TRIAL_SPAWNER, event => {
         blockEntity.sync()
     }
 
-    const spawnedCount = runtime.getInt('spawned_count')
-    const aliveCount = runtime.getInt('alive_count')
+    // Spawn as many mobs as are due (several per check when spawn_delay_ticks
+    // is shorter than the 10-tick check interval).
+    let changed = false
+    while (
+        runtime.getInt('spawned_count') < spawnCount &&
+        runtime.getInt('alive_count') < maxAlive &&
+        gameTime >= runtime.getLong('next_spawn_time')
+    ) {
+        const previousNext = runtime.getLong('next_spawn_time')
+        if (!spawnOne(level, block, blockEntity, config, runtime, mobId, gameTime)) break
 
-    if (spawnedCount >= spawnCount || aliveCount >= maxAlive) return
-    if (gameTime < runtime.getLong('next_spawn_time')) return
-
-    // ENTITY_TYPE.get() falls back to minecraft:pig for unknown ids, so check
-    // the id explicitly (tryParse also avoids exceptions on malformed ids).
-    const mobRl = $ResourceLocation.tryParse(mobId)
-    if (mobRl == null || !$BuiltInRegistries.ENTITY_TYPE.containsKey(mobRl)) return
-    const entityType = $BuiltInRegistries.ENTITY_TYPE.get(mobRl)
-
-    const mob = block.createEntity(entityType)
-    if (mob == null) return
-
-    mob.setPositionAndRotation(
-        block.x + config.getDouble('spawn_offset_x'),
-        block.y + config.getDouble('spawn_offset_y'),
-        block.z + config.getDouble('spawn_offset_z'),
-        level.random.nextFloat() * 360.0,
-        0.0
-    )
-
-    const customMobNbt = config.getCompound('mob_nbt')
-    if (!customMobNbt.isEmpty()) {
-        mob.mergeNbt(customMobNbt)
+        // Keep the cadence if we are slightly behind; resync if far behind.
+        const base = gameTime - previousNext > 20 ? gameTime : previousNext
+        runtime.putLong('next_spawn_time', base + spawnDelay)
+        changed = true
     }
 
-    if (mob instanceof $Mob) {
-        mob.setPersistenceRequired()
-    }
-
-    const mobData = mob.persistentData
-    mobData.putBoolean('custom_trial_spawner_mob', true)
-    mobData.putInt('spawner_x', block.x)
-    mobData.putInt('spawner_y', block.y)
-    mobData.putInt('spawner_z', block.z)
-    mobData.putString('spawner_dimension', block.dimension.toString())
-    mobData.putInt('cycle_id', runtime.getInt('cycle_id'))
-
-    if (!level.addFreshEntity(mob)) {
-        runtime.putLong('next_spawn_time', gameTime + 20)
-        blockEntity.sync()
-        return
-    }
-
-    runtime.putInt('spawned_count', spawnedCount + 1)
-    runtime.putInt('alive_count', aliveCount + 1)
-    runtime.putLong('next_spawn_time', gameTime + spawnDelay)
-    blockEntity.sync()
+    if (changed) blockEntity.sync()
 })
 
 // Update encounter state whenever an owned mob dies.

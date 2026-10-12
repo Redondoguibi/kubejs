@@ -22,6 +22,7 @@ StartupEvents.registry('block', event => {
     config.putInt('max_alive', 1)
     config.putInt('spawn_delay_ticks', 20)
     config.putInt('cooldown_ticks', 100)
+    config.putInt('abandon_ticks', 1200)
     config.putBoolean('require_players_to_leave', true)
     config.putBoolean('one_time', false)
     config.putBoolean('consume_spawn_egg', true)
@@ -51,6 +52,7 @@ StartupEvents.registry('block', event => {
     runtime.putInt('cycle_id', 0)
     runtime.putLong('next_spawn_time', 0)
     runtime.putLong('cooldown_until', 0)
+    runtime.putLong('abandon_since', 0)
 
     defaults.put('config', config)
     defaults.put('runtime', runtime)
